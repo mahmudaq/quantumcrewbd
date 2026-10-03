@@ -1,0 +1,41 @@
+# QuantumCrewBD — local / VPS deployment.
+#
+#   docker compose up -d --build
+#
+# Secrets are read from .env (gitignored). Nothing sensitive is in this file.
+
+services:
+  quantumcrewbd:
+    build: .
+    image: quantumcrewbd:latest
+    container_name: quantumcrewbd
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Explicit even though .env may set it: this keeps the setting visible in
+      # `docker compose config` and stops it silently reverting.
+      CREWAI_TELEMETRY_OPT_OUT: "true"
+      STREAMLIT_SERVER_HEADLESS: "true"
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+    ports:
+      # Bound to loopback: public access is via Tailscale Funnel, so the port
+      # is never exposed on the host's public interface.
+      - "127.0.0.1:8501:8501"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          # A tender run holds the full tender text plus several agent contexts
+          # in memory. 2 GB is the practical floor observed locally.
+          memory: 2g
