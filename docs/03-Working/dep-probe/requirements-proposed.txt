@@ -1,0 +1,7 @@
+crewai==1.15.23
+streamlit
+supabase
+ddgs
+pymupdf
+pydantic
+python-dotenv

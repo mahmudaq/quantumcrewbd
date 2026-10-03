@@ -1,0 +1,20 @@
+# Application source repo lives here as its own git repo — see project-notes.md
+03-Working/repo/
+
+# Credentials must never be committed — use kpass (KeePassXC)
+*.kdbx
+*.key
+.env
+.env.*
+!/.env.example
+credentials*.json
+*token*.json
+*.pem
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+__pycache__/
+*.py[cod]
+.venv/
+node_modules/
