@@ -1,0 +1,39 @@
+# Keep secrets, local data and build artefacts out of the image.
+#
+# Note: the Dockerfile already uses explicit per-path COPYs rather than
+# `COPY . .`, so .env would not be included even without this file. This is
+# defence in depth — it also keeps the build context small (the local venv is
+# several hundred MB) and stops stale .pyc files from shadowing fresh source.
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Local-only tender corpus (client data — never shipped)
+../QuantumCrewBD-local-tenders/
+fixtures-local/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# VCS / editor / OS
+.git/
+.gitignore
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Docs and probes not needed at runtime
+*.md
+!README.md
+/tmp/
