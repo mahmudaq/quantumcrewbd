@@ -293,7 +293,7 @@ class TestPhaseHandoff:
             detected_framework="World Bank SPD",
             mandatory_forms=["TECH-1", "TECH-6"],
             scope_of_work="Water supply design review",
-            client_name="PHE Lakki",
+            client_name="PHE Division X",
             technical_pass_mark=45,
             personnel_mandates=[{"role": "Team Leader", "min_years": 15}],
             teaming_mandates=[{"requirement": "ISO 27001"}],

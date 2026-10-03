@@ -39,22 +39,22 @@ tender text ──► Agent 1: RFP & Compliance Deconstruction
 **1. Number extraction is deterministic, not LLM-driven.**
 
 A naive "PDF → LLM → JSON" pipeline hallucinates tender figures. Measured
-against the reference corpus, it got the pass mark wrong on 2 of 4 documents —
-it read DOC-3's 45 as 70, and reported DOC-1's Data Sheet figure as "not
-specified" when it is stated. `parsing/datasheet.py` locates the Data Sheet /
-ITT section by pattern first and hands the LLM only the located text, so the
-model *reasons* over facts instead of searching for them.
+against a reference corpus, it got the pass mark wrong on 2 of 4 documents — in
+one case reading a 45 threshold as 70, and in another reporting a stated Data
+Sheet figure as "not specified". `parsing/datasheet.py` locates the Data
+Sheet / ITT section by pattern first and hands the LLM only the located text,
+so the model *reasons* over facts instead of searching for them.
 
-| Tender | Truth | Naive LLM | Deterministic |
+| Document | Truth | Naive LLM | Deterministic |
 |---|---|---|---|
-| DOC-1 Lakki Sanitation | 70 | ❌ "not specified" | ✅ 70 |
-| DOC-2 Naurang DWSSS | 70 | — | ✅ 70 |
-| DOC-3 Naran Feasibility | **45** | ❌ **70** | ✅ **45** |
+| Doc A | 70 | ❌ "not specified" | ✅ 70 |
+| Doc B | 70 | — | ✅ 70 |
+| Doc C | **45** | ❌ **70** | ✅ **45** |
 
-Two false positives were caught by testing against real documents, not
-fixtures: DOC-3's "30" came from a *contract notice period* ("thirty (30) days'
-written notice of termination"), and DOC-4 read as ADB because a World Bank SPD
-*cites ADB as an alternative*.
+Two false positives were caught by testing against real documents rather than
+fixtures: one was a *contract notice period* ("thirty (30) days' written notice
+of termination") misread as a pass mark, and another was a donor document that
+merely *cites* a second donor as an acceptable alternative.
 
 **2. The HITL checkpoint is a hard stop.**
 

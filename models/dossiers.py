@@ -89,7 +89,7 @@ class ComplianceItem(_Base):
     """One row of the mandatory compliance matrix.
 
     `pass_mark` is per-item and must come from the tender. Never default a
-    threshold — DOC-3's gate is 45, DOC-1/2's is 70, and hardcoding either
+    threshold — one tender's gate may be 45 and another's 70, and hardcoding either
     disqualifies the bid on the other.
     """
 

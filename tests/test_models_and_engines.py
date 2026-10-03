@@ -93,7 +93,7 @@ class TestHandoffContracts:
 class TestPassMarkIsNotDefaulted:
     """R-11 at the model layer: absent must be None, never a fabricated number.
 
-    A default of 70 would silently disqualify every DOC-3-class bid (gate 45).
+    A default of 70 would silently disqualify every bid whose real gate is 45.
     """
 
     def test_pass_mark_defaults_to_none(self):
@@ -141,7 +141,7 @@ def _full_candidate() -> Candidate:
         employment=[Employment("2015–present", "Qubec Consultants", "Team Leader",
                                "Led water supply design review.")],
         adequacy=[AdequacyMapping("Design review of DWSS",
-                                  "Lakki Marwat DWSSS supervision, 2019")],
+                                  "Sanitation & Drainage supervision, 2019")],
         years_experience=15,
     )
 

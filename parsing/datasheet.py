@@ -21,10 +21,10 @@ to go looking for the number. Every extractor returns the evidence string it
 matched on, so a wrong answer is auditable rather than merely wrong.
 
 Measured against the local corpus (4 real tenders):
-  DOC-1 Lakki Sanitation  -> 70   (stated "seventy (70) points")
-  DOC-2 Naurang DWSSS     -> 70   (same standard form)
-  DOC-3 Naran Feasibility -> 45   (evaluation table "Passing Marks 45")
-  DOC-4 World Bank SPD    -> form-based, no national pass-mark table
+  Doc A -> 70   (stated "seventy (70) points")
+  Doc B -> 70   (same standard form)
+  Doc C -> 45   (evaluation table "Passing Marks 45")
+  Doc D -> form-based, no national pass-mark table
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ _UNITS = "|".join(k for k in _NUMBER_WORDS if _NUMBER_WORDS[k] < 10)
 # parenthetical is followed by a scoring unit. Without that requirement this
 # pattern matches contract boilerplate: "at least thirty (30) days' written
 # notice of termination" is a notice period, not a pass mark. Verified false
-# positive on DOC-3 before this guard was added.
+# positive on Doc C before this guard was added.
 _SPELLED_WITH_DIGIT = re.compile(
     rf"\b({_WORD_ALT})(?:[-\s]({_UNITS}))?"
     rf"\s*\(\s*(\d{{1,3}})\s*\)",
@@ -157,9 +157,9 @@ def locate_data_sheet(text: str, *, max_chars: int = _MAX_SHEET_CHARS) -> DataSh
     """Return the Data Sheet region, or ``None`` if the document has none.
 
     Returns ``None`` rather than guessing: a caller that cannot find a Data Sheet
-    must not silently fall back to a hallucinated number. DOC-4 (World Bank SPD
-    for a training firm) legitimately has no national pass-mark table, and
-    treating that as failure would be wrong.
+    must not silently fall back to a hallucinated number. Doc D is a
+    form-based donor document with no national pass-mark table, and treating
+    that as failure would be wrong.
     """
     if not text or not text.strip():
         return None
@@ -386,12 +386,11 @@ def detect_framework(text: str) -> dict[str, object]:
     signals: list[str] = []
     low = text.lower()
 
-    # Count donor *mentions* rather than testing presence. A World Bank SPD
-    # routinely names ADB/other multilateral banks as alternative acceptable
-    # references, so a bare "ADB" match mislabels the framework. Verified:
-    # DOC-4 (World Bank training-firm RFP) contains both names and was
-    # classified "ADB QCBS" by a presence test. Whichever donor dominates the
-    # document is the governing one.
+    # Count donor *mentions* rather than testing presence. A donor SPD
+    # routinely names other multilateral banks as alternative acceptable
+    # references, so a bare name match mislabels the framework. Verified: one
+    # document contains both names and was classified wrongly by a presence
+    # test. Whichever donor dominates the document is the governing one.
     wb_hits = len(re.findall(r"world\s+bank|international\s+bank\s+for\s+reconstruction", low))
     adb_hits = len(re.findall(r"asian\s+development\s+bank", low))
     is_wb = wb_hits > 0

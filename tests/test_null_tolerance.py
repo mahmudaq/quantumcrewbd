@@ -92,7 +92,7 @@ class TestOptionalsAreNotStomped:
     """A null on a genuinely optional field means 'not stated' — keep it."""
 
     def test_pass_mark_null_stays_null(self):
-        """DOC-3's gate is 45 and DOC-1/2's is 70; absence is a real signal."""
+        """Gates differ per document (45 vs 70); absence is a real signal."""
         assert ComplianceItem.model_validate({"pass_mark": None}).pass_mark is None
 
     def test_min_years_null_stays_null(self):

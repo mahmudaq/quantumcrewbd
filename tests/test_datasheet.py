@@ -1,14 +1,15 @@
 """Tests for the deterministic tender extractor (defect R-11).
 
-Every fixture string here is a REAL excerpt from the local tender corpus, kept
-verbatim including the line breaks. That matters: the DOC-1 pass mark is only
-findable because "seventy (70) points" survives on one line, and the DOC-3
-false positive was caused specifically by a line break inside "at\nleast thirty".
+The fixtures below reproduce the *structure* of the failing passages — the line
+breaks matter more than the words. A pass mark is only findable when
+"seventy (70) points" survives on one line, and one false positive was caused
+specifically by a line break inside "at\nleast thirty".
 
 The two regressions this file exists to prevent:
-  * DOC-3 reported 30 — matched the contract's "at least thirty (30) days'
-    written notice of termination" and never found the real "Passing Marks 45".
-  * DOC-4 classified ADB — a World Bank SPD that merely *mentions* ADB.
+  * a pass mark reported as 30 — the contract's "at least thirty (30) days'
+    written notice of termination" was matched instead of the real
+    "Passing Marks 45" in the evaluation table.
+  * a document classified as one donor when it merely *mentions* that donor.
 """
 from __future__ import annotations
 
@@ -28,13 +29,13 @@ from parsing.datasheet import (
 
 # --- real excerpts --------------------------------------------------------- #
 
-# DOC-1 / DOC-2 Data Sheet, para 19.4 (truth: 70)
+# Data Sheet, para 19.4 (truth: 70)
 DOC1_DATASHEET = """
 DATA SHEET
 Para
 Description
 2.1
-Name of Scheme: "Design-Review and Supervision Sanitation & Drainage
+Name of Scheme: "Design-Review and Supervision of Municipal
 Infrastructure"
 2.2
 Method of Selection: Single Stage Two Envelopes
@@ -49,7 +50,7 @@ Form TECH-1. Technical Proposal Submission Form
 Form TECH-6. Team Composition and Personnel CVs
 """
 
-# DOC-3 evaluation table (truth: 45)
+# Evaluation table (truth: 45)
 DOC3_EVAL_TABLE = """
 Evaluation Criteria
 Quality and Cost Based Selection (QCBS)
@@ -64,7 +65,7 @@ Evaluation/Feasibility (Qualitative)(Doc Required)
 15
 """
 
-# The exact boilerplate that produced the DOC-3 false positive.
+# The boilerplate pattern that produced a false positive.
 DOC3_FALSE_POSITIVE = """
 In such an occurrence the Procuring Agency shall give at
 least thirty (30) days' written notice of termination to the Consultant in case
@@ -77,7 +78,7 @@ as the Consultant may have subsequently allowed in writing).
 
 class TestFindPassMark:
     def test_doc1_spelled_with_digits_in_data_sheet(self):
-        """DOC-1: 'equal or more than seventy (70) points' -> 70."""
+        """'equal or more than seventy (70) points' -> 70."""
         r = find_pass_mark(DOC1_DATASHEET)
         assert r is not None
         assert r.mark == 70
@@ -85,7 +86,7 @@ class TestFindPassMark:
         assert r.strategy == "spelled_with_digits"
 
     def test_doc3_passing_marks_table(self):
-        """DOC-3: the 'Passing Marks\\n45' table row -> 45."""
+        """The 'Passing Marks\\n45' table row -> 45."""
         r = find_pass_mark(DOC3_EVAL_TABLE)
         assert r is not None
         assert r.mark == 45
@@ -94,13 +95,13 @@ class TestFindPassMark:
     def test_notice_period_is_not_a_pass_mark(self):
         """REGRESSION: 'at least thirty (30) days written notice' must not match.
 
-        This exact text made DOC-3 report a passing mark of 30 while the real
-        answer (45) sat in the evaluation table.
+        This text makes an extractor report a passing mark of 30 while the
+        real answer (45) sits in the evaluation table.
         """
         assert find_pass_mark(DOC3_FALSE_POSITIVE) is None
 
     def test_does_not_invent_a_mark_when_absent(self):
-        """DOC-4 (World Bank SPD) states no pass mark -> None, never a default."""
+        """A form-based donor document has no pass mark -> None, never a default."""
         text = ("World Bank Standard Procurement Document. Two-stage Request for "
                 "Proposals. The Borrower shall evaluate proposals in accordance "
                 "with the criteria in the Data Sheet. Form TECH-1 is required.")
@@ -197,7 +198,7 @@ class TestEnvelopeScheme:
 
 class TestRequiredForms:
     def test_only_forms_actually_cited(self):
-        """DOC-3 cites no TECH codes at all — must not be given a default set.
+        """A tender that cites no TECH codes must not be given a default set.
 
         Anchoring a CV engine on TECH-6 when the tender never cites it is how a
         bid gets disqualified for submitting the wrong form set.

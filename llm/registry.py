@@ -107,7 +107,7 @@ COMMANDCODE = Provider(
     max_prompt_tokens=None,  # took a 23k-token tender in one call, 1.7s
     notes="Cloudflare-fronted; pay-as-you-go, no markup",
     models={
-        # --- DeepSeek family (all 3/3 correct on the DOC-3 extraction probe) ---
+        # --- DeepSeek family (all 3/3 correct on the extraction probe) ---
         "deepseek-v4.1-flash-fast": ModelSpec(
             id="deepseek/deepseek-v4.1-flash",
             context_tokens=1_000_000,
@@ -136,7 +136,7 @@ COMMANDCODE = Provider(
             output_usd_per_mtok=1.98,
             peak_multiplier=2.0,
         ),
-        # --- Cheaper alternatives (verified tool-calling + correct on DOC-3) ---
+        # --- Cheaper alternatives (verified tool-calling + correct extraction) ---
         "gpt-6-luna": ModelSpec(
             id="gpt-6-luna",
             context_tokens=1_100_000,
@@ -168,7 +168,7 @@ AGENT_MODEL_DEFAULTS: dict[str, str] = {}
 #:
 #: Wall-clock time in this pipeline is output volume / throughput, and every
 #: model on the provider runs ~100-110 tok/s, so the cap is the only real
-#: latency lever. Measured baseline on the Naran tender: the writer emitted
+#: latency lever. Measured baseline on a real tender: the writer emitted
 #: ~47k chars and the reviewer ~46k (~23k tokens between them) at ~101 tok/s,
 #: which is 230s of the 430s total.
 #:

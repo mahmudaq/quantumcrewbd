@@ -228,7 +228,7 @@ def render_ingest() -> None:
         title = st.text_input("Project title", key="ing_title",
                               placeholder="Third-Party Feasibility Study …")
         client_name = st.text_input("Client / procuring entity", key="ing_client",
-                                    placeholder="PHE Division Lakki Marwat")
+                                    placeholder="PHE Division, District X")
     with right:
         st.caption("The tender text stays in this session. Nothing is uploaded "
                    "until you generate a proposal.")

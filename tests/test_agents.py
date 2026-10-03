@@ -98,7 +98,7 @@ class TestAnalyzer:
 
 class TestMarketIntel:
     def test_prompt_includes_scope_and_roles(self):
-        p = market_intel.build_prompt("Design review", "PHE Lakki", "Pakistan",
+        p = market_intel.build_prompt("Design review", "PHE Division X", "Country",
                                       "Water", ["Team Leader", "GIS Analyst"])
         assert "Design review" in p
         assert "Team Leader" in p and "GIS Analyst" in p

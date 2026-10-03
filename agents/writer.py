@@ -2,7 +2,7 @@
 
 Emits the six standard forms when the framework is World Bank / ADB, or the six
 commercial sections otherwise. The form *set* comes from the analysis, not from
-a hardcoded list: DOC-3 cites no TECH codes at all, and emitting a TECH-6
+a hardcoded list: some tenders cite no TECH codes at all, and emitting a TECH-6
 section for a tender that never asked for one is a formatting defect a reviewer
 will catch.
 
