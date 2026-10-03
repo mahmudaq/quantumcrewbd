@@ -50,12 +50,15 @@ def build_agent(
     switching the writer to a different model is a config change, not a code
     change. Called once per agent per run.
     """
-    cfg = resolve(agent=agent_key, overrides=overrides, settings=settings)
     return Agent(
         role=role,
         goal=goal,
         backstory=backstory,
-        llm=build_llm(cfg),
+        llm=build_llm(
+            agent=agent_key,
+            overrides=overrides,
+            settings=settings,
+        ),
         tools=list(tools or []),
         allow_delegation=allow_delegation,
         verbose=verbose,

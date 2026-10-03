@@ -221,7 +221,15 @@ def resolve(
     ``model`` accepts either a registry alias (``deepseek-v4.1-flash-fast``) or
     a raw provider model id (``deepseek/deepseek-v4.1-flash``) for ids that
     aren't in the registry yet — the admin page can add arbitrary models.
+
+    Passing an already-resolved :class:`LLMConfig` as ``agent`` returns it
+    unchanged. That is not the intended call shape, but it is an easy mistake
+    and silently resolving a config object raises a confusing AttributeError
+    deep inside the resolver.
     """
+    if isinstance(agent, LLMConfig):
+        return agent
+
     env_map = os.environ if env is None else env
     overrides = overrides or {}
     settings = settings or {}
