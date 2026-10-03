@@ -1,0 +1,53 @@
+# --- Secrets: never commit --------------------------------------------------
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+*credentials*.json
+*token*.json
+*.pem
+*.key
+*.kdbx
+
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+
+# --- Test / tooling ---------------------------------------------------------
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# --- OS / editor ------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# --- Runtime artifacts ------------------------------------------------------
+*.log
+.data/
+uploads/
+exports/
+
+# --- Tender documents & fixtures: NEVER COMMIT --------------------------------
+# Real RFPs and their extracted text contain bidder PII (names, CNICs, CVs,
+# contact details). The repo may become public for hackathon judging.
+# Tenders live OUTSIDE the repo: ../QuantumCrewBD-local-tenders/
+tests/fixtures/tenders/
+fixtures/
+*samples/tenders*
+*.rfp
+RFP_*
+*_RFP*
+Corrigendum*
+

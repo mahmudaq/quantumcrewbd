@@ -1,0 +1,13 @@
+# QuantumCrewBD — development / test dependencies
+# Kept out of requirements.txt so Streamlit Community Cloud does not install them.
+#
+# Install with an explicit pair — do NOT use `-r requirements.txt` here: a
+# relative include forces pip to resolve a nested path, which is fragile under
+# Cloud's uv-first installer. Duplicating requirements.txt instead keeps each
+# file independently resolvable.
+
+# Install:  uv pip install -r requirements.txt -r requirements-dev.txt
+
+pytest==8.4.2
+pytest-asyncio==1.2.0
+respx==0.22.0

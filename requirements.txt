@@ -1,0 +1,22 @@
+# QuantumCrewBD — production dependencies
+#
+# Exact pins, verified by resolution + live import against Python 3.12 on 2026-10-03.
+# See docs/02-Sent/QuantumCrewBD_E2E_Development_Plan_v1.0.0.md §2 R-01.
+#
+# DO NOT use the dependency list printed in the source specification documents:
+# those pins are a generation stale and DO NOT INSTALL (crewai>=0.80.0; current is
+# 1.15.23, and pydantic==2.13.5 is unsatisfiable against crewai's <2.13 ceiling).
+#
+# Direct dependencies only — let the resolver pick transitives.
+# Streamlit Community Cloud installs this file; it tries uv first, then falls back
+# to pip. Do not add stdlib modules (math, random, distutils); they are not
+# installable packages and will break the build.
+
+crewai==1.15.23
+streamlit==1.65.0
+supabase==2.32.0
+ddgs==9.16.0
+pymupdf==1.28.2
+python-docx==1.2.0
+python-dotenv==1.2.4
+pydantic==2.12.5
