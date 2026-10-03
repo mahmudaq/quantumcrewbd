@@ -1,0 +1,22 @@
+# QuantumCrewBD — Streamlit runtime configuration
+#
+# Committed on purpose: this file holds THEME ONLY and no secrets.
+# Secrets go in `.streamlit/secrets.toml` (local, gitignored) or in
+# Streamlit Community Cloud's secrets UI (deployed).
+#
+# Note: Community Cloud reads this file from the repository root.
+
+[theme]
+base = "light"
+primaryColor = "#1E3A5F"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F6F8"
+textColor = "#1A1A1A"
+
+[server]
+# Uploaded tender documents (RFP PDFs) can be large; the default 200 MB cap is
+# generous but we pin it so behaviour is identical locally and on Cloud.
+maxUploadSize = 100
+
+[browser]
+gatherUsageStats = false
