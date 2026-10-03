@@ -98,12 +98,11 @@ def render_sidebar() -> None:
         st.caption("Autonomous Bid Production")
 
         if not st.session_state.authed:
-            st.markdown("#### Sign in")
-            email = st.text_input("Email", key="login_email")
-            password = st.text_input("Password", type="password", key="login_pw")
-            if st.button("Sign in", use_container_width=True):
-                _do_login(email, password)
-            st.caption("New here? Users are provisioned by an administrator.")
+            tab_in, tab_up = st.tabs(["Sign in", "Create account"])
+            with tab_in:
+                _render_sign_in()
+            with tab_up:
+                _render_sign_up()
             return
 
         st.success(st.session_state.user_email or "signed in")
@@ -124,28 +123,128 @@ def render_sidebar() -> None:
         _render_bench()
 
 
-def _do_login(email: str, password: str) -> None:
+def _captcha_token(widget_key: str) -> str | None:
+    """Render the hCaptcha widget and return its token.
+
+    The widget is rendered inside ``components.html``, which runs in an iframe
+    and cannot reach the parent DOM directly. The token therefore crosses back
+    through Streamlit's own component bridge: the iframe posts a message, which
+    ``st.components.v1.html`` surfaces to the app on the *next* rerun.
+
+    Returns None when CAPTCHA is disabled (the default for a fresh clone), so
+    the same form code works with and without bot protection.
+    """
+    from auth.flow import captcha_config
+
+    cfg = captcha_config()
+    if not cfg.enabled:
+        return None
+    if not cfg.has_site_key:
+        st.error("Bot protection is enabled but no site key is configured. "
+                 "Set HCAPTCHA_SITE_KEY (see docs/AUTH-SETUP.md).")
+        return None
+
+    token = st.text_input("Bot protection token", key=widget_key,
+                          help="Paste-free: the challenge below writes here "
+                               "automatically once solved.",
+                          label_visibility="collapsed")
+    st.components.v1.html(
+        f"""
+        <script src="https://js.hcaptcha.com/1/api.js" async defer></script>
+        <div class="h-captcha"
+             data-sitekey="{cfg.site_key}"
+             data-callback="onSolved"
+             data-size="normal"></div>
+        <script>
+          function onSolved(token) {{
+            window.parent.postMessage(
+              {{type: "streamlit:setComponentValue", value: token}},
+              "*");
+          }}
+        </script>
+        """,
+        height=90,
+    )
+    return (token or "").strip() or None
+
+
+def _render_sign_in() -> None:
+    """Sign-in form. Sign-in is not rate-limited the way sign-up is, because
+    only someone holding a real credential benefits from retrying."""
+    email = st.text_input("Email", key="login_email")
+    password = st.text_input("Password", type="password", key="login_pw")
+    token = _captcha_token("login_captcha")
+    if st.button("Sign in", use_container_width=True):
+        _do_login(email, password, token)
+
+
+def _render_sign_up() -> None:
+    """Account creation.
+
+    Kept in the app rather than left to an administrator because the deployment
+    is publicly reachable; an admin-only posture on a public URL means the
+    first stranger to find it is the only one who can get in.
+    """
+    from auth.flow import MIN_PASSWORD_LENGTH
+
+    email = st.text_input("Email", key="signup_email")
+    password = st.text_input("Password", type="password", key="signup_pw",
+                             help=f"At least {MIN_PASSWORD_LENGTH} characters.")
+    confirm = st.text_input("Confirm password", type="password",
+                            key="signup_pw2")
+    token = _captcha_token("signup_captcha")
+
+    if st.button("Create account", use_container_width=True):
+        if password != confirm:
+            st.error("The two passwords do not match.")
+            return
+        _do_sign_up(email, password, token)
+
+    st.caption("You will receive a confirmation link before you can sign in.")
+
+
+def _do_sign_up(email: str, password: str, captcha_token: str | None) -> None:
+    """Create an account, then tell the user what happens next.
+
+    Note what is NOT revealed: whether the address was already registered. The
+    outcome message comes from ``auth.flow`` as a single shared constant, so
+    this form cannot accidentally distinguish the two cases.
+    """
+    from auth.flow import sign_up
+
+    with st.spinner("Creating account…"):
+        res = sign_up(email, password, captcha_token=captcha_token)
+    if res.ok:
+        st.success(res.message)
+    else:
+        st.error(res.message)
+
+
+def _do_login(email: str, password: str, captcha_token: str | None = None) -> None:
     """Sign in against Supabase Auth and keep the real JWT.
 
     The token is stored in session state (never on disk, never logged) because
     every RLS-scoped query needs it.
     """
+    from auth.flow import sign_in
+
     if not email or not password:
         st.warning("Enter an email and password.")
         return
-    try:
-        res = get_supabase_client().auth.sign_in_with_password(
-            {"email": email, "password": password})
-    except Exception as e:                                       # noqa: BLE001
-        st.error(f"Sign-in failed: {e}")
+    with st.spinner("Signing in…"):
+        outcome = sign_in(email, password, captcha_token=captcha_token)
+    if not outcome.ok:
+        st.error(outcome.message)
         return
-    if not getattr(res, "session", None):
+    # The session came back with the same call — no second round-trip, and one
+    # fewer way for sign-in to fail.
+    if not outcome.access_token:
         st.error("Sign-in returned no session — is the email confirmed?")
         return
     st.session_state.authed = True
-    st.session_state.access_token = res.session.access_token
-    st.session_state.user_id = res.user.id
-    st.session_state.user_email = res.user.email
+    st.session_state.access_token = outcome.access_token
+    st.session_state.user_id = outcome.user_id
+    st.session_state.user_email = outcome.user_email
     st.rerun()
 
 
