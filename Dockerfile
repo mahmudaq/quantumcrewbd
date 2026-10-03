@@ -34,7 +34,11 @@ FROM base AS runtime
 COPY --from=deps /install /usr/local
 
 # Source last: this layer changes most often, everything above stays cached.
+# Every top-level package the app imports must be listed here — a missing COPY
+# produces an ImportError at request time, not at build time, so the container
+# still reports healthy.
 COPY app.py ./
+COPY auth/ ./auth/
 COPY llm/ ./llm/
 COPY agents/ ./agents/
 COPY models/ ./models/
