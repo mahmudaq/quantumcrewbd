@@ -233,6 +233,12 @@ class FinalSubmissionDossier(_Base):
     score_verdict: str = ""
     score_by_dimension: dict[str, dict[str, float]] = Field(default_factory=dict)
 
+    # The reviewer's per-criterion verdicts. The score is computed from THESE in
+    # Python, not from the model's arithmetic — see agents/reviewer.py. Without
+    # this list there is no verdict to count, and a score computed from the
+    # unassessed requirements would always be 0%.
+    criterion_assessments: list[ComplianceItem] = Field(default_factory=list)
+
     # Arithmetic the reviewer re-derived, so a mismatch is visible.
     recomputed_total_mandays: float | None = None
     mandays_mismatch: bool = False           # stated vs recomputed LOE total

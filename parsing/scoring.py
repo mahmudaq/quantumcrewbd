@@ -77,14 +77,24 @@ class ComplianceScorecard:
         }
 
 
-def compliance_score(criteria: Sequence[Criterion | dict[str, Any]]) -> ComplianceScorecard:
+def _coerce(item: Any) -> "Criterion":
+    """Accept a Criterion, a plain dict, or any Pydantic model."""
+    if isinstance(item, Criterion):
+        return item
+    if not isinstance(item, dict):
+        dump = getattr(item, "model_dump", None)
+        item = dump() if callable(dump) else dict(item)
+    return Criterion.from_dict(item)
+
+
+def compliance_score(criteria: Sequence[Any]) -> ComplianceScorecard:
     """(Passed / Total) × 100, plus a per-dimension breakdown.
 
     Returns a 0-scored card for an empty list rather than raising: "no mandatory
     criteria extracted" is itself a finding, and the caller needs to be able to
     show it.
     """
-    items = [c if isinstance(c, Criterion) else Criterion.from_dict(c) for c in criteria]
+    items = [_coerce(c) for c in criteria]
     total = len(items)
     passed = sum(1 for c in items if c.passed)
 

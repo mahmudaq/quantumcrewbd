@@ -28,6 +28,21 @@ __all__ = [
     "LLMConfig",
     "ModelSpec",
     "Provider",
+    "build_llm",
     "list_models",
     "resolve",
 ]
+
+
+def __getattr__(name: str):
+    """Lazily expose ``build_llm``.
+
+    Importing :mod:`llm.client` pulls in CrewAI, which is heavy. The registry
+    itself is imported by plain unit tests that should not need CrewAI
+    installed, so the factory is resolved on first use rather than at module
+    import.
+    """
+    if name == "build_llm":
+        from llm.client import build_llm
+        return build_llm
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
