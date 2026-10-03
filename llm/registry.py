@@ -164,6 +164,29 @@ DEFAULT_MODEL_ALIAS = "deepseek-v4.1-flash-fast"
 #:   "extractor": "gpt-6-luna",
 AGENT_MODEL_DEFAULTS: dict[str, str] = {}
 
+#: Per-agent output caps (tokens).
+#:
+#: Wall-clock time in this pipeline is output volume / throughput, and every
+#: model on the provider runs ~100-110 tok/s, so the cap is the only real
+#: latency lever. Measured baseline on the Naran tender: the writer emitted
+#: ~47k chars and the reviewer ~46k (~23k tokens between them) at ~101 tok/s,
+#: which is 230s of the 430s total.
+#:
+#: These are DEFAULT budgets, overridable per agent via ``LLM_MAX_TOKENS_<AGENT>``
+#: or ``LLM_MAX_TOKENS``, or per call. Tighten for speed, raise for depth.
+#:
+#: The writer and reviewer are capped hardest because their output is prose.
+#: The analyzer is left generous: it emits structured JSON covering every
+#: mandatory criterion, and truncating it would silently drop compliance
+#: requirements — a correctness failure, not a slow one.
+AGENT_MAX_TOKENS: dict[str, int] = {
+    "analyzer": 8_000,
+    "market_intel": 4_000,
+    "resource_planner": 6_000,
+    "writer": 12_000,
+    "reviewer": 6_000,
+}
+
 #: Names of the agents in the crew, for UI discovery / validation.
 #:
 #: These MUST match ``agents/__init__.py.__all__`` — the config UI and the
@@ -198,6 +221,18 @@ class LLMConfig:
     needs_browser_user_agent: bool
     max_prompt_tokens: int | None
     temperature: float = 0.0
+    #: Cap on generated tokens per LLM call.
+    #:
+    #: This is the dominant latency lever: the pipeline's wall-clock time is
+    #: output volume / throughput. Measured on CommandCode, every model in the
+    #: catalogue runs ~100-110 tok/s, so swapping models does not help — the
+    #: only thing that moves the number is emitting fewer tokens. Left at None
+    #: the provider default applies and the writer/reviewer were producing
+    #: ~23,000 tokens of technical prose between them.
+    max_tokens: int | None = None
+    #: Multiplier applied to ``max_tokens`` on pricing/display. Not used for
+    #: truncation — kept so the admin UI can describe a budget tier.
+    budget_tier: str = "standard"
 
     def api_key(self) -> str | None:
         return os.getenv(self.api_key_env)
@@ -213,6 +248,42 @@ def _clean(value: object) -> str | None:
     return text
 
 
+def _resolve_max_tokens(
+    key: str,
+    overrides: dict[str, str] | None,
+    explicit: int | None,
+) -> int | None:
+    """Pick the per-call output cap.
+
+    Precedence mirrors the model resolution: explicit argument, then a
+    per-agent override, then ``LLM_MAX_TOKENS``, then None (provider default).
+
+    None is a legitimate value meaning "no cap" — some providers reject an
+    explicit maximum, so we only send the field when it is actually set.
+    """
+    if explicit is not None:
+        return explicit if explicit > 0 else None
+
+    env_map = os.environ
+    raw = (
+        (overrides or {}).get(f"max_tokens:{key}")
+        if key
+        else None
+    )
+    if not raw and key:
+        raw = env_map.get(f"LLM_MAX_TOKENS_{key.upper()}")
+    if not raw and key:
+        raw = AGENT_MAX_TOKENS.get(key)
+    if not raw:
+        raw = env_map.get("LLM_MAX_TOKENS")
+
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 def resolve(
     agent: str | None = None,
     model: str | None = None,
@@ -220,6 +291,7 @@ def resolve(
     overrides: dict[str, str] | None = None,
     settings: dict[str, str] | None = None,
     temperature: float | None = None,
+    max_tokens: int | None = None,
     env: dict[str, str] | None = None,
 ) -> LLMConfig:
     """Resolve the effective LLM config for ``agent``.
@@ -285,6 +357,7 @@ def resolve(
         needs_browser_user_agent=True,
         max_prompt_tokens=prov.max_prompt_tokens,
         temperature=0.0 if temperature is None else temperature,
+        max_tokens=_resolve_max_tokens(key, overrides, max_tokens),
     )
 
 

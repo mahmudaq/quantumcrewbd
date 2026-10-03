@@ -81,15 +81,39 @@ class Phase2Result:
     errors: list[str] = field(default_factory=list)
 
 
-def _run_crew(agent, description: str, expected: str, bridge: EventBridge | None):
-    """Run one single-agent crew and return the raw text output."""
+def _run_crew(agent, description: str, expected: str, bridge: EventBridge | None,
+              *, label: str = "agent"):
+    """Run one single-agent crew and return the raw text output.
+
+    Wrapped in :func:`retry_call` because the provider intermittently returns an
+    empty response, and CrewAI 1.15.23 exposes no retry knob of its own. Without
+    this, one flake discards every dossier produced earlier in the run.
+    """
     from crewai import Crew, Process, Task
 
-    task = Task(description=description, expected_output=expected, agent=agent)
-    crew = Crew(agents=[agent], tasks=[task], process=Process.sequential,
-                verbose=False)
-    out = crew.kickoff()
-    return str(out)
+    from orchestration.resilience import retry_call
+
+    def _once() -> str:
+        task = Task(description=description, expected_output=expected, agent=agent)
+        crew = Crew(agents=[agent], tasks=[task], process=Process.sequential,
+                    verbose=False)
+        out = crew.kickoff()
+        text = str(out)
+        # kickoff() can return successfully while carrying no content — that is
+        # the observed CommandCode flake. Treat it as a failure so the retry
+        # path sees it rather than handing an empty string to the parser.
+        if not text.strip():
+            raise ValueError("LLM returned None or empty response")
+        return text
+
+    def _on_retry(attempt: int, exc: BaseException, delay: float) -> None:
+        if bridge:
+            bridge.on_error(
+                f"{label}: transient failure on attempt {attempt} "
+                f"({type(exc).__name__}) — retrying in {delay:.1f}s"
+            )
+
+    return retry_call(_once, label=label, on_retry=_on_retry)
 
 
 def run_analyzer_phase(
@@ -108,8 +132,7 @@ def run_analyzer_phase(
 
     prompt = analyzer.build_prompt(raw_rfp_text, project_title, client_name)
     agent = analyzer.build_analyzer(overrides=overrides, settings=settings)
-    raw = _run_crew(agent, prompt, "A single JSON object matching the RFP dossier schema.",
-                    bridge)
+    raw = _run_crew(agent, prompt, "A single JSON object matching the RFP dossier schema.", label="analyzer")
     dossier = analyzer.parse_dossier(raw)
 
     # Fill anything the model omitted from the deterministic extraction. The
@@ -169,8 +192,7 @@ def run_proposal_generation_phase(
                 analysis.scope_of_work, analysis.client_name)
             agent = market_intel.build_market_intel(
                 tools or [], overrides=overrides, settings=settings)
-            raw = _run_crew(agent, prompt, "A single JSON object matching the market dossier schema.",
-                            bridge)
+            raw = _run_crew(agent, prompt, "A single JSON object matching the market dossier schema.", label="market_intel")
             result.market = market_intel.parse_dossier(raw)
             if bridge:
                 bridge.on_agent_end("market_intel", ok=True)
@@ -191,8 +213,7 @@ def run_proposal_generation_phase(
                 analysis.scope_of_work, analysis.mandatory_forms)
             agent = resource_planner.build_resource_planner(
                 tools or [], overrides=overrides, settings=settings)
-            raw = _run_crew(agent, prompt, "A single JSON object matching the resource dossier schema.",
-                            bridge)
+            raw = _run_crew(agent, prompt, "A single JSON object matching the resource dossier schema.", label="resource_planner")
             result.resources = resource_planner.parse_dossier(raw)
             if bridge:
                 bridge.on_agent_end("resource_planner", ok=True)
@@ -228,8 +249,7 @@ def run_proposal_generation_phase(
         prompt = writer.build_prompt(analysis, result.resources, result.market,
                                      rendered_cvs=result.rendered_cvs)
         agent = writer.build_writer(overrides=overrides, settings=settings)
-        raw = _run_crew(agent, prompt, "A single JSON object matching the draft dossier schema.",
-                        bridge)
+        raw = _run_crew(agent, prompt, "A single JSON object matching the draft dossier schema.", label="writer")
         result.draft = writer.parse_dossier(raw)
         if bridge:
             bridge.on_agent_end("writer", ok=True)
@@ -253,8 +273,7 @@ def run_proposal_generation_phase(
                 analysis.technical_pass_mark, phases,
                 result.draft.stated_total_mandays)
             agent = reviewer.build_reviewer(overrides=overrides, settings=settings)
-            raw = _run_crew(agent, prompt, "A single JSON object matching the final dossier schema.",
-                            bridge)
+            raw = _run_crew(agent, prompt, "A single JSON object matching the final dossier schema.", label="reviewer")
             result.final = reviewer.parse_dossier(
                 raw, phases=phases, mandatory_forms=analysis.mandatory_forms,
                 stated_mandays=result.draft.stated_total_mandays,

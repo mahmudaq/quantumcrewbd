@@ -83,6 +83,63 @@ class TestResolveDefaults:
             assert got == "gpt-oss-120b", f"{name} ignored its per-agent override"
 
 
+class TestMaxTokens:
+    """Output cap — the dominant latency lever.
+
+    Wall-clock is output volume / throughput, and every model on the provider
+    runs ~100-110 tok/s, so emitting fewer tokens is the only thing that
+    actually moves the number.
+    """
+
+    def test_defaults_are_set_for_every_real_agent(self):
+        import agents
+        from llm.registry import AGENT_MAX_TOKENS
+
+        for name in agents.__all__:
+            assert AGENT_MAX_TOKENS.get(name), f"{name} has no output budget"
+
+    def test_every_agent_resolves_a_cap(self):
+        import agents
+
+        for name in agents.__all__:
+            assert resolve(agent=name).max_tokens, f"{name} resolved no cap"
+
+    def test_explicit_argument_beats_the_default(self):
+        assert resolve(agent="writer", max_tokens=999).max_tokens == 999
+
+    def test_per_agent_env_beats_the_default(self, monkeypatch):
+        monkeypatch.setenv("LLM_MAX_TOKENS_WRITER", "4321")
+        assert resolve(agent="writer").max_tokens == 4321
+
+    def test_global_env_applies_when_no_agent_default(self, monkeypatch):
+        """An agent with no registry default still gets the global cap."""
+        monkeypatch.setenv("LLM_MAX_TOKENS", "777")
+        assert resolve(agent="some_future_agent").max_tokens == 777
+
+    def test_zero_and_junk_mean_uncapped_not_a_crash(self, monkeypatch):
+        """'no cap' must stay expressible — some providers reject the field."""
+        monkeypatch.setenv("LLM_MAX_TOKENS_WRITER", "0")
+        assert resolve(agent="writer").max_tokens is None
+        monkeypatch.setenv("LLM_MAX_TOKENS_WRITER", "not-a-number")
+        assert resolve(agent="writer").max_tokens is None
+
+    def test_negative_is_treated_as_uncapped(self):
+        assert resolve(agent="writer", max_tokens=-5).max_tokens is None
+
+    def test_cap_is_omitted_from_crewai_kwargs_when_uncapped(self):
+        """Only send max_tokens when set, or a picky provider 400s."""
+        from llm.client import _llm_kwargs
+
+        kwargs = _llm_kwargs(resolve(agent="writer", max_tokens=0), "k")
+        assert "max_tokens" not in kwargs
+
+    def test_cap_is_passed_to_crewai_when_set(self):
+        from llm.client import _llm_kwargs
+
+        kwargs = _llm_kwargs(resolve(agent="writer", max_tokens=1234), "k")
+        assert kwargs["max_tokens"] == 1234
+
+
 class TestPrecedence:
     def test_explicit_model_beats_everything(self):
         cfg = resolve(

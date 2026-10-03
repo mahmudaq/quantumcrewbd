@@ -157,18 +157,82 @@ def parse_dossier(text: str) -> RFPComplianceDossier:
 
 
 def _extract_json(text: str) -> dict[str, Any]:
+    """Pull a JSON object out of a model's output, tolerantly.
+
+    Models wrap their JSON in prose or a fenced block, and — critically — they
+    emit *unescaped control characters* when a string value contains markdown.
+    A proposal body is full of newlines, so the writer regularly produces:
+
+        {"body": "## Section
+
+        Some text"}
+
+    which is invalid JSON. Standard ``json.loads`` rejects it with
+    "Expecting ',' delimiter" or "Invalid control character". This was
+    intermittent in practice: the same prompt parsed on two runs and failed on
+    the third, so it read as flakiness rather than a bug.
+
+    ``strict=False`` is the documented stdlib escape hatch that permits literal
+    control characters inside strings, and it fixes this class of failure
+    without weakening anything else.
+
+    All five agents share this function, so the hardening applies to every
+    dossier, not just the writer's.
+    """
     import re
 
     if not text or not text.strip():
-        raise ValueError("analyzer returned empty output")
+        raise ValueError("agent returned empty output")
+
+    candidates: list[str] = []
 
     fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if fence:
-        return json.loads(fence.group(1))
+        candidates.append(fence.group(1))
 
-    start = text.find("{")
-    end = text.rfind("}")
+    start, end = text.find("{"), text.rfind("}")
     if start != -1 and end > start:
-        return json.loads(text[start: end + 1])
+        candidates.append(text[start:end + 1])
+    elif start != -1:
+        # Opening brace but no closing one at all — the model was cut off
+        # mid-object. Hand the raw remainder to the repair pass rather than
+        # discarding the run.
+        candidates.append(text[start:])
 
-    raise ValueError(f"no JSON object found in analyzer output: {text[:200]!r}")
+    if not candidates:
+        raise ValueError(f"no JSON object found in agent output: {text[:200]!r}")
+
+    errors: list[str] = []
+    for blob in candidates:
+        # Fast path: the model escaped everything correctly.
+        try:
+            return json.loads(blob)
+        except json.JSONDecodeError as exc:
+            errors.append(f"strict: {exc}")
+
+        # Real path: literal newlines/tabs inside string values.
+        try:
+            return json.loads(blob, strict=False)
+        except json.JSONDecodeError as exc:
+            errors.append(f"non-strict: {exc}")
+
+        # Last resort: a truncated blob. Models hit the output cap mid-object
+        # or mid-string; salvaging is better than losing the run, because every
+        # dossier field is optional with a sane default and the reviewer checks
+        # completeness downstream.
+        #
+        # Order matters — most specific truncation first:
+        #   '"}  ..cut inside a string value, object still open
+        #   ']}  ..cut inside a string, inside an array in an object
+        #   }    ..value complete, object close missing
+        #   ]}   ..array + object close missing
+        for suffix in ('"}', '"]}', '"}]}', '}', ']}', '}]}', '"'):
+            try:
+                return json.loads(blob + suffix, strict=False)
+            except json.JSONDecodeError:
+                continue
+
+    raise ValueError(
+        "could not parse agent JSON after strict, non-strict and repair "
+        f"attempts: {'; '.join(errors)}"
+    )

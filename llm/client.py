@@ -87,12 +87,27 @@ def build_llm(
 
     from crewai import LLM  # imported lazily: keeps registry import light
 
-    return LLM(
-        model=cfg.crewai_model,
-        base_url=cfg.base_url,
-        api_key=key,
-        temperature=cfg.temperature,
-    )
+    return LLM(**_llm_kwargs(cfg, key))
+
+
+def _llm_kwargs(cfg: LLMConfig, key: str) -> dict[str, Any]:
+    """Build the kwargs handed to CrewAI's ``LLM``.
+
+    Split out from :func:`build_llm` so the shape can be asserted in tests
+    without constructing a real LLM (which would need a live provider).
+
+    ``max_tokens`` is included ONLY when set: some providers reject an explicit
+    maximum with a 400, and "uncapped" is a legitimate configuration.
+    """
+    kwargs: dict[str, Any] = {
+        "model": cfg.crewai_model,
+        "base_url": cfg.base_url,
+        "api_key": key,
+        "temperature": cfg.temperature,
+    }
+    if cfg.max_tokens:
+        kwargs["max_tokens"] = cfg.max_tokens
+    return kwargs
 
 
 def provider_env_hint(cfg: LLMConfig) -> str:
