@@ -46,6 +46,42 @@ class TestResolveDefaults:
             cfg = resolve(agent=agent, env=EMPTY_ENV)
             assert cfg.model_alias == DEFAULT_MODEL_ALIAS
 
+    def test_known_agents_matches_the_real_agent_modules(self):
+        """The registry list and agents/__init__.py must not drift.
+
+        The per-agent model override (``LLM_MODEL_<AGENT>``) and the admin
+        config UI both key off these exact strings. When the list held phantom
+        names — "analyst"/"extractor"/"compliance"/"consortium" — a user could
+        set a model for "analyzer" and the system would silently ignore it,
+        because "analyzer" was not a recognised key.
+        """
+        import agents
+        from llm.registry import KNOWN_AGENTS
+
+        assert set(KNOWN_AGENTS) == set(agents.__all__), (
+            f"registry {sorted(KNOWN_AGENTS)} != modules {sorted(agents.__all__)}"
+        )
+        assert len(KNOWN_AGENTS) == len(set(KNOWN_AGENTS)), "duplicate agent name"
+
+    def test_per_agent_override_actually_changes_that_agents_model(self):
+        """The regression, at the level the user experiences it.
+
+        Setting LLM_MODEL_ANALYZER must change the analyzer's model and leave
+        the other agents alone.
+        """
+        env = {"LLM_MODEL_ANALYZER": "gpt-oss-120b"}
+        assert resolve(agent="analyzer", env=env).model_alias == "gpt-oss-120b"
+        assert resolve(agent="writer", env=env).model_alias == DEFAULT_MODEL_ALIAS
+
+    def test_every_real_agent_name_is_override_honoured(self):
+        """No real agent may be silently un-overridable."""
+        import agents
+
+        for name in agents.__all__:
+            env = {f"LLM_MODEL_{name.upper()}": "gpt-oss-120b"}
+            got = resolve(agent=name, env=env).model_alias
+            assert got == "gpt-oss-120b", f"{name} ignored its per-agent override"
+
 
 class TestPrecedence:
     def test_explicit_model_beats_everything(self):

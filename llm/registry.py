@@ -165,12 +165,18 @@ DEFAULT_MODEL_ALIAS = "deepseek-v4.1-flash-fast"
 AGENT_MODEL_DEFAULTS: dict[str, str] = {}
 
 #: Names of the agents in the crew, for UI discovery / validation.
+#:
+#: These MUST match ``agents/__init__.py.__all__`` — the config UI and the
+#: ``LLM_MODEL_<AGENT>`` per-agent override both key off these strings, so a
+#: drifted list silently makes per-agent model selection a no-op. This list
+#: previously held phantom names ("analyst", "extractor", "compliance",
+#: "consortium") while omitting two real agents ("analyzer",
+#: "resource_planner"), so overriding the analyzer's model appeared to work and
+#: did nothing. tests/test_llm_registry.py asserts the two stay in sync.
 KNOWN_AGENTS: tuple[str, ...] = (
-    "analyst",
-    "extractor",
-    "compliance",
+    "analyzer",
     "market_intel",
-    "consortium",
+    "resource_planner",
     "writer",
     "reviewer",
 )
