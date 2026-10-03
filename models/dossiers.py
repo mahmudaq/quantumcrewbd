@@ -13,6 +13,7 @@ assert that what Agent N emits is what Agent N+1 reads.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -165,8 +166,23 @@ class ConsortiumMember(_Base):
 
 class LevelOfEffortEntry(_Base):
     phase: str = ""
-    duration_days: float = 0
-    fte: float = 0
+    # Coerce null to 0: an LLM that cannot determine a figure emits null, and a
+    # single unresolved number must not invalidate the entire dossier. The
+    # reviewer recomputes the total anyway, so a null here is not a silent data
+    # loss — it shows up as a mandays mismatch.
+    duration_days: float = Field(default=0, ge=0)
+    fte: float = Field(default=0, ge=0)
+
+    @field_validator("duration_days", "fte", mode="before")
+    @classmethod
+    def _null_to_zero(cls, v: Any) -> Any:
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return 0
+        if isinstance(v, str):
+            # "0.5 FTE" / "12 days" / "1,200" — keep the leading number.
+            m = re.search(r"-?\d+(?:\.\d+)?", v.replace(",", ""))
+            return float(m.group()) if m else 0
+        return v
 
 
 class ResourceAndConsortiumDossier(_Base):

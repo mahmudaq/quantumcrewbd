@@ -213,6 +213,70 @@ class TestWriter:
 # Agent 5 — reviewer
 # --------------------------------------------------------------------------- #
 
+class TestNullTolerance:
+    """Gate 3 caught this live: Agent 3 emitted ``fte: null`` for a level-of-effort
+    row, and the whole dossier was rejected.
+
+    An LLM that cannot determine a number emits null rather than 0, so every
+    numeric field a model fills must tolerate null. One unknown figure must
+    degrade to "unknown", never invalidate a 50k-character dossier.
+    """
+
+    def test_level_of_effort_null_fte_is_zero_not_an_error(self):
+        from models.dossiers import LevelOfEffortEntry
+        e = LevelOfEffortEntry(phase="Inception", duration_days=30, fte=None)
+        assert e.fte == 0 and e.duration_days == 30
+
+    def test_level_of_effort_null_duration_is_zero(self):
+        from models.dossiers import LevelOfEffortEntry
+        e = LevelOfEffortEntry(phase="X", duration_days=None, fte=0.5)
+        assert e.duration_days == 0 and e.fte == 0.5
+
+    def test_level_of_effort_parses_numeric_strings(self):
+        """"12 days" / "0.5 FTE" are things models actually emit."""
+        from models.dossiers import LevelOfEffortEntry
+        e = LevelOfEffortEntry(phase="A", duration_days="12 days", fte="0.5 FTE")
+        assert e.duration_days == 12 and e.fte == 0.5
+
+    def test_level_of_effort_handles_thousands_separator(self):
+        from models.dossiers import LevelOfEffortEntry
+        assert LevelOfEffortEntry(phase="A", duration_days="1,200").duration_days == 1200
+
+    def test_unparseable_string_degrades_to_zero(self):
+        from models.dossiers import LevelOfEffortEntry
+        assert LevelOfEffortEntry(phase="A", duration_days="TBD").duration_days == 0
+
+    def test_whole_resource_dossier_survives_a_null_row(self):
+        """The exact live failure, at the level it actually occurred."""
+        from models.dossiers import ResourceAndConsortiumDossier
+        d = ResourceAndConsortiumDossier.model_validate({
+            "key_personnel_table": [{"name": "A", "role": "TL"}],
+            "level_of_effort_table": [
+                {"phase": "Inception", "duration_days": 30, "fte": None},
+                {"phase": "Design", "duration_days": None, "fte": 1},
+            ],
+            "total_mandays": None,
+        })
+        assert len(d.level_of_effort_table) == 2
+        assert d.level_of_effort_table[0].fte == 0
+
+    def test_negative_days_rejected_not_silently_accepted(self):
+        """null means "unknown"; a negative days count is still invalid."""
+        import pytest
+        from pydantic import ValidationError
+
+        from models.dossiers import LevelOfEffortEntry
+        with pytest.raises(ValidationError):
+            LevelOfEffortEntry(phase="A", duration_days=-5)
+
+    def test_extra_model_keys_are_kept_not_dropped(self):
+        """A model that invents an insightful field must not lose it."""
+        from models.dossiers import RFPComplianceDossier
+        d = RFPComplianceDossier.model_validate(
+            {"detected_framework": "World Bank SPD", "some_insight": "kept"})
+        assert d.some_insight == "kept"
+
+
 class TestReviewer:
     CRITERIA = [
         {"criterion": "PEC registration", "mandatory": True, "pass_mark": 70},

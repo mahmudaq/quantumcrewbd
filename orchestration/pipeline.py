@@ -115,6 +115,12 @@ def run_analyzer_phase(
     # Fill anything the model omitted from the deterministic extraction. The
     # parsers are exact, so their value wins over a model that guessed.
     pre = analyzer.pre_extract(raw_rfp_text)
+    # The caller already knows these two — asking the model to echo them back is
+    # a needless chance to get them wrong.
+    if not dossier.project_title:
+        dossier.project_title = project_title
+    if not dossier.client_name:
+        dossier.client_name = client_name
     if dossier.technical_pass_mark is None and pre["technical_pass_mark"] is not None:
         dossier.technical_pass_mark = pre["technical_pass_mark"]
     if not dossier.mandatory_forms and pre["mandatory_forms"]:
