@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # --------------------------------------------------------------------------- #
 # Shared
@@ -29,9 +29,41 @@ _FRAMEWORKS = Literal[
 
 
 class _Base(BaseModel):
-    """Lenient base — extra keys are kept, not rejected."""
+    """Lenient base — extra keys are kept, not rejected.
+
+    Carries one fleet-wide guard: an explicit ``null`` for a field that has a
+    declared default is replaced by that default.
+
+    This exists because per-field validators do not scale. ``LevelOfEffortEntry``
+    coerced nulls for ``duration_days``/``fte`` only, and the very next live run
+    died on a different field:
+
+        key_personnel_table.0.candidate_name
+        Input should be a valid string [type=string_type, input_value=None]
+
+    A model emits ``null`` for anything it could not determine. For a field
+    declared ``str = ""`` that is noise, not a semantic statement — and letting
+    it reject the dossier throws away four agents' work. Handling it once on the
+    base class means every present and future field with a default is covered.
+
+    Genuinely optional fields (``float | None = None``) are deliberately left
+    alone: there, ``None`` means "not stated in the tender", which is a fact the
+    reviewer needs. Only non-None declared defaults are substituted.
+    """
 
     model_config = ConfigDict(extra="allow", populate_by_name=True, str_strip_whitespace=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _null_to_declared_default(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        for name, f in cls.model_fields.items():
+            if name in out and out[name] is None and not f.is_required():
+                if f.default is not None or f.default_factory is not None:
+                    out[name] = f.get_default(call_default_factory=True)
+        return out
 
 
 # --------------------------------------------------------------------------- #
