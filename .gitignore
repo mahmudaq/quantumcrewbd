@@ -38,3 +38,16 @@ Thumbs.db
 .data/
 uploads/
 exports/
+
+# --- Tender documents & fixtures: NEVER COMMIT --------------------------------
+# Real RFPs and their extracted text contain bidder PII (names, CNICs, CVs,
+# contact details). The repo may become public for hackathon judging.
+# Tenders live OUTSIDE the repo: ../QuantumCrewBD-local-tenders/
+tests/fixtures/tenders/
+fixtures/
+*samples/tenders*
+*.rfp
+RFP_*
+*_RFP*
+Corrigendum*
+
