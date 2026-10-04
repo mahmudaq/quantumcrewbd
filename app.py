@@ -31,6 +31,7 @@ from typing import Any
 import streamlit as st
 
 from database.supabase_client import get_supabase_client, get_user_client
+from tools import Toolbox, ddg_search
 from llm.account_keys import (
     MissingSecretKeyError,
     load_account_llm,
@@ -682,12 +683,28 @@ def _run_phase2(framework: str) -> None:
     timings = PhaseTimings()
     overrides, settings = _llm_overrides()
 
+    # Phase-2 agents are tool-using: the internal bench/partner searches read
+    # Supabase, and the discovery tools search the public web. Without tools the
+    # agents have nothing to call, so market_intel emits tool-call markup that
+    # nothing can satisfy and the dossier parse fails outright.
+    #
+    # The client is captured HERE, on the Streamlit thread, and closed over: the
+    # bench reads must run as the signed-in user (R-04 -- an anon client sees zero
+    # rows and masquerades as an empty bench), but `st.session_state` must not be
+    # touched from the worker threads the phase runs its tracks on.
+    _tools: list[Any] = []
+    _client_obj = _client()
+    if _client_obj is not None:
+        _tools = Toolbox(client_factory=lambda: _client_obj,
+                         searcher=ddg_search).tools()
+
     with st.status("Generating proposal…", expanded=True) as status:
         st.write("Track A (resource & consortium) and Track B (market "
                  "intelligence) are running concurrently…")
         try:
             res = run_proposal_generation_phase(
-                analysis, injected_cvs=st.session_state.injected_cvs,
+                analysis, tools=_tools,
+                injected_cvs=st.session_state.injected_cvs,
                 bridge=bridge, timings=timings, overrides=overrides,
                 settings=settings)
         except Exception as e:                                   # noqa: BLE001
