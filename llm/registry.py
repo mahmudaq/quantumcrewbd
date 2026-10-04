@@ -23,6 +23,8 @@ Verified facts baked in (see docs/04-Reference/llm-providers.md):
 
 from __future__ import annotations
 
+from typing import Any
+
 import os
 from dataclasses import dataclass, field, replace
 
@@ -289,7 +291,7 @@ def resolve(
     model: str | None = None,
     provider: str | None = None,
     overrides: dict[str, str] | None = None,
-    settings: dict[str, str] | None = None,
+    settings: dict[str, Any] | None = None,
     temperature: float | None = None,
     max_tokens: int | None = None,
     env: dict[str, str] | None = None,
@@ -319,21 +321,30 @@ def resolve(
             candidate
             for candidate in (
                 _clean(model),                                   # 1 call site
-                _clean(overrides.get(key)) if key else None,     # 2 override
-                _clean(settings.get(key)) if key else None,      # 3 tenant/DB
+                _clean(overrides.get(key)) if key else None,     # 2 agent override
+                _clean(settings.get(key)) if key else None,      # 3 agent tenant/DB
+                # Global (all-agents) choices. Two shapes are accepted because
+                # the app's account UI sends {"provider","model"} while
+                # per-agent callers send {"<agent>": ...}. Without these two the
+                # per-account model selector silently does nothing: resolve()
+                # would only ever look up overrides[key].
+                _clean(overrides.get("model")),                  # 4 account override
+                _clean(settings.get("model")),                   # 5 account DB
                 _clean(env_map.get(f"LLM_MODEL_{key.upper()}")) if key else None,
                 _clean(AGENT_MODEL_DEFAULTS.get(key)) if key else None,  # per-agent
-                _clean(env_map.get("LLM_MODEL")),                # 4 global env
-                DEFAULT_MODEL_ALIAS,                             # 5 fallback
+                _clean(env_map.get("LLM_MODEL")),                # 6 global env
+                DEFAULT_MODEL_ALIAS,                             # 7 fallback
             )
             if candidate
         ),
         DEFAULT_MODEL_ALIAS,
     )
 
-    # Provider: explicit > env > global default.
+    # Provider: explicit > account override > account DB > env > default.
     prov_name = (
         _clean(provider)
+        or _clean(overrides.get("provider"))
+        or _clean(settings.get("provider"))
         or _clean(env_map.get("LLM_PROVIDER"))
         or DEFAULT_PROVIDER
     )

@@ -26,10 +26,16 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import streamlit as st
 
 from database.supabase_client import get_supabase_client, get_user_client
+from llm.account_keys import (
+    MissingSecretKeyError,
+    load_account_llm,
+    save_account_llm,
+)
 from parsing.cv import CVExtraction, extract_cv_file
 from orchestration.monitor import AGENT_LABEL, EventBridge
 from orchestration.pipeline import (
@@ -248,6 +254,9 @@ def _do_login(email: str, password: str, captcha_token: str | None = None) -> No
     st.session_state.access_token = outcome.access_token
     st.session_state.user_id = outcome.user_id
     st.session_state.user_email = outcome.user_email
+    # Load this account's provider/model/key once, at sign-in. Cached in the
+    # session so the key is decrypted on entry rather than on every rerun.
+    _reload_account_llm()
     st.rerun()
 
 
@@ -260,22 +269,51 @@ def _render_llm_settings() -> None:
     """
     from llm.registry import PROVIDERS
 
-    st.caption("Applied to this run only. Leave as-is for the defaults.")
+    st.caption("Stored on this account. Leave as-is for the deployment defaults.")
+
     provider = st.selectbox("Provider", ["(default)"] + sorted(PROVIDERS),
                             key="llm_provider")
     model = st.text_input("Model id (optional)", key="llm_model",
                           placeholder="e.g. deepseek/deepseek-v4.1-flash-fast")
-    if st.button("Save to my account", key="llm_save"):
-        client = _client()
-        if client:
-            try:
-                client.table("profiles").update(
-                    {"llm_provider": None if provider == "(default)" else provider,
-                     "llm_model": model or None}
-                ).eq("id", st.session_state.user_id).execute()
-                st.success("Saved.")
-            except Exception as e:                               # noqa: BLE001
-                st.error(f"Could not save: {e}")
+
+    cfg = st.session_state.get("account_llm") or {}
+    if cfg.get("api_key"):
+        st.caption("🔑 An API key is saved on this account.")
+    elif os.getenv("COMMANDCODE_API_KEY") or os.getenv("GROQ_API_KEY"):
+        st.caption("No key saved on this account — the deployment's key will be used.")
+    else:
+        st.caption("⚠️ No API key available. Save one below, or runs will fail.")
+
+    if st.session_state.get("llm_key_error"):
+        st.warning(st.session_state.pop("llm_key_error"))
+
+    key = st.text_input("API key (optional)", type="password", key="llm_key_new",
+                        placeholder="leave blank to keep the saved key")
+    c1, c2 = st.columns(2)
+    if c1.button("Save to my account", key="llm_save"):
+        try:
+            save_account_llm(
+                _client(), st.session_state.user_id,
+                provider=None if provider == "(default)" else provider,
+                model=model,
+                api_key=key if key else None,     # None = keep the existing key
+            )
+            _reload_account_llm()
+            st.success("Saved to your account.")
+            st.rerun()
+        except MissingSecretKeyError as e:
+            st.error(f"Cannot save: {e}")
+        except Exception as e:                                   # noqa: BLE001
+            st.error(f"Could not save: {e}")
+    if cfg.get("api_key") and c2.button("Remove saved key", key="llm_clear"):
+        try:
+            save_account_llm(_client(), st.session_state.user_id,
+                             api_key="")              # "" = clear the stored key
+            _reload_account_llm()
+            st.success("Saved key removed.")
+            st.rerun()
+        except Exception as e:                                   # noqa: BLE001
+            st.error(f"Could not remove: {e}")
 
 
 def _as_str_list(value) -> list[str]:
@@ -678,16 +716,69 @@ def _run_phase2(framework: str) -> None:
     st.rerun()
 
 
-def _llm_overrides() -> tuple[dict[str, str], dict[str, str]]:
-    """Read the sidebar's per-account LLM choice into pipeline overrides."""
-    overrides: dict[str, str] = {}
+def _reload_account_llm() -> None:
+    """Load the signed-in account's provider/model/key into the session.
+
+    Never raises: if the profile row is missing (an older account created before
+    the migration) the run simply falls back to the deployment default.
+    """
+    try:
+        cfg = load_account_llm(_client(), st.session_state.get("user_id"))
+    except Exception as e:                                          # noqa: BLE001
+        cfg = {}
+        st.session_state.llm_key_error = f"could not load account settings: {e}"
+    st.session_state.account_llm = cfg
+    st.session_state.llm_provider = cfg.get("provider") or "(default)"
+    st.session_state.llm_model = cfg.get("model") or ""
+    if cfg.get("key_error"):
+        st.session_state.llm_key_error = cfg["key_error"]
+
+
+def _resolve_api_key(provider: str | None) -> str | None:
+    """Pick the API key for a run, most specific source first.
+
+    1. a key entered by the user for THIS run (never persisted)
+    2. the key stored on their account
+    3. the deployment's environment variable
+    """
+    entered = (st.session_state.get("run_api_key") or "").strip()
+    if entered:
+        return entered
+    stored = (st.session_state.get("account_llm") or {}).get("api_key")
+    if stored:
+        # Guard against a stored key that belongs to a different provider.
+        configured = (st.session_state.get("account_llm") or {}).get("provider")
+        if not configured or not provider or configured == provider:
+            return stored
+    return None
+
+
+def _llm_overrides() -> tuple[dict[str, dict], dict[str, Any]]:
+    """Per-run LLM choice.
+
+    ``overrides`` is keyed 'provider'/'model' and is read by ``resolve()`` for
+    every agent (see llm/registry.py). ``settings`` carries the API key, which
+    the pipeline threads through to each agent's ``build_llm`` call. It travels
+    as a plain function argument rather than a context variable on purpose:
+    Track A/B run inside a ThreadPoolExecutor, where a ContextVar set on the
+    main thread would not propagate.
+    """
     provider = st.session_state.get("llm_provider") or "(default)"
     model = (st.session_state.get("llm_model") or "").strip()
-    if provider and provider != "(default)":
+    if provider == "(default)":
+        provider = ""
+
+    overrides: dict[str, dict] = {}
+    if provider:
         overrides["provider"] = provider
     if model:
         overrides["model"] = model
-    return overrides, {}
+
+    settings: dict[str, Any] = {}
+    api_key = _resolve_api_key(provider or None)
+    if api_key:
+        settings["api_key"] = api_key
+    return overrides, settings
 
 
 def render_execution() -> None:
@@ -854,14 +945,41 @@ def render_admin() -> None:
         st.markdown(f"**{name}** — " + ", ".join(f"`{m}`" for m in sorted(p.models)))
 
     st.divider()
-    st.markdown("### Test a key")
-    st.caption("Sends one minimal request. A failure here means every agent run "
-               "will fail the same way.")
+    st.markdown("### This account's key")
+    cfg = st.session_state.get("account_llm") or {}
+    if cfg.get("api_key"):
+        st.success("✅ An API key is saved on this account and will be used for "
+                   "your runs.")
+    elif os.getenv("COMMANDCODE_API_KEY") or os.getenv("GROQ_API_KEY"):
+        st.info("No key saved on this account — the deployment's environment key "
+                "will be used.")
+    else:
+        st.warning("🔴 No API key is configured. Runs will fail until one is saved.")
+
+    st.caption("The key is encrypted before storage and is never shown again. "
+               "Everyone on this account shares it.")
+
     provider = st.selectbox("Provider", sorted(PROVIDERS), key="adm_provider")
     key = st.text_input("API key", type="password", key="adm_key")
     model = st.text_input("Model id override (optional)", key="adm_model")
-    if st.button("Test", key="adm_test"):
-        _test_key(provider, key, model)
+    c1, c2 = st.columns(2)
+    if c1.button("Test", key="adm_test"):
+        _test_key(provider, key or cfg.get("api_key") or "", model)
+    if c2.button("Save to this account", key="adm_save"):
+        try:
+            save_account_llm(
+                _client(), st.session_state.user_id,
+                provider=provider,
+                model=model,
+                api_key=key if key else None,     # blank = keep the saved key
+            )
+            _reload_account_llm()
+            st.success("Saved to this account.")
+            st.rerun()
+        except MissingSecretKeyError as e:
+            st.error(f"Cannot save: {e}")
+        except Exception as e:                                   # noqa: BLE001
+            st.error(f"Could not save: {e}")
 
 
 def _test_key(provider: str, key: str, model: str) -> None:

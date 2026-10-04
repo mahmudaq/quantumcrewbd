@@ -63,8 +63,11 @@ def build_llm(
 ) -> Any:
     """Return a CrewAI ``LLM`` for ``agent``, fully configured.
 
-    ``api_key`` may be passed explicitly (e.g. a per-tenant key from the
-    database); otherwise the provider's environment variable is used.
+    The key is resolved most-specific-first:
+      1. ``api_key=`` (an explicit argument)
+      2. ``settings["api_key"]`` — how the pipeline carries a per-account key
+         down to every agent without touching the environment
+      3. the provider's environment variable
     """
     cfg: LLMConfig = resolve(
         agent=agent,
@@ -75,7 +78,7 @@ def build_llm(
         temperature=temperature,
     )
 
-    key = api_key or cfg.api_key()
+    key = api_key or (settings or {}).get("api_key") or cfg.api_key()
     if not key:
         raise MissingAPIKeyError(
             f"no API key for provider {cfg.provider!r}: set {cfg.api_key_env} "
