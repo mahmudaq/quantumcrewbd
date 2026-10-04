@@ -177,7 +177,11 @@ AGENT_MODEL_DEFAULTS: dict[str, str] = {}
 #: These are DEFAULT budgets, overridable per agent via ``LLM_MAX_TOKENS_<AGENT>``
 #: or ``LLM_MAX_TOKENS``, or per call. Tighten for speed, raise for depth.
 #:
-#: The writer and reviewer are capped hardest because their output is prose.
+#: No budget is set below what the agent actually emits. An earlier table capped
+#: the reviewer at 6_000 -- below the writer -- on the theory that prose should
+#: be capped hardest. That starved it: the reviewer's output is a superset of the
+#: writer's, and on a reasoning model the chain-of-thought is billed against the
+#: same budget. See the reviewer entry below for the failure it caused.
 #: The analyzer is left generous: it emits structured JSON covering every
 #: mandatory criterion, and truncating it would silently drop compliance
 #: requirements — a correctness failure, not a slow one.
@@ -186,7 +190,16 @@ AGENT_MAX_TOKENS: dict[str, int] = {
     "market_intel": 4_000,
     "resource_planner": 6_000,
     "writer": 12_000,
-    "reviewer": 6_000,
+    # The reviewer produces a SUPERSET of the writer's output: it re-emits the
+    # whole corrected proposal as `final_proposal_text`, and it reasons first.
+    # On a reasoning model the chain-of-thought is billed against max_tokens, so
+    # a budget below the writer's starves it -- observed live as the provider
+    # returning an empty completion (reasoning consumed all 6_000), which CrewAI
+    # surfaces as "Invalid response from LLM call - None or empty". That is a
+    # deterministic failure, so the retry wrapper could not save it: three
+    # attempts, three empties. max_tokens is a ceiling, not a target, so the
+    # headroom costs nothing on runs that finish early.
+    "reviewer": 20_000,
 }
 
 #: Names of the agents in the crew, for UI discovery / validation.
