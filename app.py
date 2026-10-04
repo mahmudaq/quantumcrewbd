@@ -22,12 +22,15 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import streamlit as st
 
 from database.supabase_client import get_supabase_client, get_user_client
+from parsing.cv import CVExtraction, extract_cv_file
 from orchestration.monitor import AGENT_LABEL, EventBridge
 from orchestration.pipeline import (
     PhaseTimings,
@@ -275,35 +278,153 @@ def _render_llm_settings() -> None:
                 st.error(f"Could not save: {e}")
 
 
+def _as_str_list(value) -> list[str]:
+    """Coerce an extraction field to a list of plain strings (never None)."""
+    return [str(x) for x in (value or [])]
+
+
+def _bench_cv_summary(ext: CVExtraction) -> str:
+    """A compact, human-readable summary derived from the extraction.
+
+    The bench needs a ``cv_summary`` (Agent 3 searches it); the extractor does not
+    invent prose, so we compose one from the parts it did find.
+    """
+    bits: list[str] = []
+    if ext.current_role.value:
+        bits.append(str(ext.current_role.value))
+    if ext.employer.value:
+        bits.append(f"at {ext.employer.value}")
+    years = ext.stated_years.value or ext.years_experience.value
+    if years:
+        bits.append(f"— {years} years' experience")
+    head = " ".join(bits)
+    detail = []
+    skills = _as_str_list(ext.skills.value)
+    certs = _as_str_list(ext.certifications.value)
+    if skills:
+        detail.append("Skills: " + ", ".join(skills[:12]))
+    if certs:
+        detail.append("Certifications: " + ", ".join(certs))
+    if ext.education.value:
+        detail.append(f"Education: {ext.education.value}")
+    return ". ".join(p for p in (head,) if p) + ("\n" + "\n".join(detail) if detail else "")
+
+
+def _render_cv_upload() -> None:
+    """Upload a CV file, extract fields deterministically, let the user correct."""
+    st.caption("Upload a PDF or DOCX — the fields below are filled in automatically "
+               "and you can correct anything before saving.")
+    up = st.file_uploader("CV file", type=["pdf", "docx", "txt", "md"],
+                          key="cv_file", label_visibility="collapsed")
+    if not up:
+        return
+    try:
+        with tempfile.NamedTemporaryFile(suffix=Path(up.name).suffix, delete=False) as tmp:
+            tmp.write(up.getbuffer())
+            tmp_path = tmp.name
+        ext = extract_cv_file(tmp_path)
+    except Exception as e:                                       # noqa: BLE001
+        st.error(f"Could not read {up.name}: {e}")
+        return
+    finally:
+        try:
+            os.unlink(tmp_path)                                  # type: ignore[possibly-undefined]
+        except Exception:                                        # noqa: BLE001
+            pass
+
+    for w in ext.warnings:
+        st.warning(w)
+    if ext.genre == "worldbank-form":
+        st.caption("Detected a World Bank / ADB style CV form.")
+
+    # Extraction is a *proposal*: every value is editable, and the extraction
+    # source is shown so a wrong guess is visible rather than silently saved.
+    st.session_state.setdefault("cv_ext", {})
+    e = st.session_state.cv_ext
+    e["name"] = st.text_input("Full name", value=str(ext.full_name.value or ""),
+                              key="cv_up_name")
+    e["role"] = st.text_input("Role / title", value=str(ext.current_role.value or ""),
+                              key="cv_up_role")
+    e["years"] = st.number_input(
+        "Years experience", 0, 70, int(ext.years_experience.value or 0), key="cv_up_years")
+    if ext.stated_years.value and ext.years_experience.value \
+            and abs(int(ext.stated_years.value) - int(ext.years_experience.value)) >= 3:
+        st.caption(f"CV states {ext.stated_years.value} years; date ranges imply "
+                   f"{ext.years_experience.value}. Adjust if needed.")
+    e["certs"] = st.text_input(
+        "Certifications (comma-separated)",
+        value=", ".join(_as_str_list(ext.certifications.value)), key="cv_up_certs")
+    e["skills"] = st.text_input(
+        "Skills (comma-separated)",
+        value=", ".join(_as_str_list(ext.skills.value)), key="cv_up_skills")
+    e["summary"] = st.text_area("CV summary", value=_bench_cv_summary(ext),
+                                key="cv_up_summary", height=90)
+    with st.expander("What was found (extraction detail)", expanded=False):
+        for label in ("full_name", "current_role", "employer", "years_experience",
+                      "stated_years", "email", "phone", "education"):
+            f = getattr(ext, label)
+            st.markdown(f"- **{label}**: `{f.value}` — *{f.source or 'not found'}*")
+        if ext.roles:
+            st.markdown("**Roles located**")
+            st.dataframe([{k: r.get(k) for k in ("start", "end", "title", "employer")}
+                          for r in ext.roles], use_container_width=True, hide_index=True)
+
+    if st.button("Save to bench", key="cv_up_save", type="primary"):
+        row = {
+            "user_id": st.session_state.user_id,
+            "full_name": e["name"],
+            "current_role": e["role"],
+            "years_experience": int(e["years"]),
+            "certifications": [c.strip() for c in e["certs"].split(",") if c.strip()],
+            "skills": [s.strip() for s in e["skills"].split(",") if s.strip()],
+            "cv_summary": e["summary"],
+        }
+        if not e["name"]:
+            st.warning("Full name is required.")
+        else:
+            try:
+                _client().table("team_cvs").insert(row).execute()
+                st.success(f"Added {e['name']} to the bench.")
+                st.session_state.pop("cv_ext", None)
+            except Exception as exc:                             # noqa: BLE001
+                st.error(f"Could not add: {exc}")
+
+
 def _render_bench() -> None:
     """Add/view internal bench CVs. This is what Agent 3 searches."""
     client = _client()
     if not client:
         return
-    with st.expander("Add a bench member", expanded=False):
-        name = st.text_input("Full name", key="cv_name")
-        role = st.text_input("Role / title", key="cv_role")
-        years = st.number_input("Years experience", 0, 60, 5, key="cv_years")
-        certs = st.text_input("Certifications (comma-separated)", key="cv_certs")
-        skills = st.text_input("Skills (comma-separated)", key="cv_skills")
-        summary = st.text_area("CV summary", key="cv_summary", height=80)
-        if st.button("Add to bench", key="cv_add"):
-            if not name or not summary:
-                st.warning("Name and summary are required.")
-            else:
-                try:
-                    client.table("team_cvs").insert({
-                        "user_id": st.session_state.user_id,
-                        "full_name": name,
-                        "current_role": role,
-                        "years_experience": int(years),
-                        "certifications": [c.strip() for c in certs.split(",") if c.strip()],
-                        "skills": [s.strip() for s in skills.split(",") if s.strip()],
-                        "cv_summary": summary,
-                    }).execute()
-                    st.success(f"Added {name}.")
-                except Exception as e:                           # noqa: BLE001
-                    st.error(f"Could not add: {e}")
+
+    mode = st.radio("Add to bench by", ["Uploading a CV", "Typing details"],
+                    horizontal=True, key="cv_mode", label_visibility="collapsed")
+    if mode == "Uploading a CV":
+        _render_cv_upload()
+    else:
+        with st.expander("Add a bench member", expanded=True):
+            name = st.text_input("Full name", key="cv_name")
+            role = st.text_input("Role / title", key="cv_role")
+            years = st.number_input("Years experience", 0, 60, 5, key="cv_years")
+            certs = st.text_input("Certifications (comma-separated)", key="cv_certs")
+            skills = st.text_input("Skills (comma-separated)", key="cv_skills")
+            summary = st.text_area("CV summary", key="cv_summary", height=80)
+            if st.button("Add to bench", key="cv_add"):
+                if not name or not summary:
+                    st.warning("Name and summary are required.")
+                else:
+                    try:
+                        client.table("team_cvs").insert({
+                            "user_id": st.session_state.user_id,
+                            "full_name": name,
+                            "current_role": role,
+                            "years_experience": int(years),
+                            "certifications": [c.strip() for c in certs.split(",") if c.strip()],
+                            "skills": [s.strip() for s in skills.split(",") if s.strip()],
+                            "cv_summary": summary,
+                        }).execute()
+                        st.success(f"Added {name}.")
+                    except Exception as e:                       # noqa: BLE001
+                        st.error(f"Could not add: {e}")
 
     if st.button("Show bench", key="cv_show"):
         try:
