@@ -132,7 +132,7 @@ def run_analyzer_phase(
 
     prompt = analyzer.build_prompt(raw_rfp_text, project_title, client_name)
     agent = analyzer.build_analyzer(overrides=overrides, settings=settings)
-    raw = _run_crew(agent, prompt, "A single JSON object matching the RFP dossier schema.", label="analyzer")
+    raw = _run_crew(agent, prompt, "A single JSON object matching the RFP dossier schema.", bridge, label="analyzer")
     dossier = analyzer.parse_dossier(raw)
 
     # Fill anything the model omitted from the deterministic extraction. The
@@ -192,7 +192,7 @@ def run_proposal_generation_phase(
                 analysis.scope_of_work, analysis.client_name)
             agent = market_intel.build_market_intel(
                 tools or [], overrides=overrides, settings=settings)
-            raw = _run_crew(agent, prompt, "A single JSON object matching the market dossier schema.", label="market_intel")
+            raw = _run_crew(agent, prompt, "A single JSON object matching the market dossier schema.", bridge, label="market_intel")
             result.market = market_intel.parse_dossier(raw)
             if bridge:
                 bridge.on_agent_end("market_intel", ok=True)
@@ -213,7 +213,7 @@ def run_proposal_generation_phase(
                 analysis.scope_of_work, analysis.mandatory_forms)
             agent = resource_planner.build_resource_planner(
                 tools or [], overrides=overrides, settings=settings)
-            raw = _run_crew(agent, prompt, "A single JSON object matching the resource dossier schema.", label="resource_planner")
+            raw = _run_crew(agent, prompt, "A single JSON object matching the resource dossier schema.", bridge, label="resource_planner")
             result.resources = resource_planner.parse_dossier(raw)
             if bridge:
                 bridge.on_agent_end("resource_planner", ok=True)
@@ -249,7 +249,7 @@ def run_proposal_generation_phase(
         prompt = writer.build_prompt(analysis, result.resources, result.market,
                                      rendered_cvs=result.rendered_cvs)
         agent = writer.build_writer(overrides=overrides, settings=settings)
-        raw = _run_crew(agent, prompt, "A single JSON object matching the draft dossier schema.", label="writer")
+        raw = _run_crew(agent, prompt, "A single JSON object matching the draft dossier schema.", bridge, label="writer")
         result.draft = writer.parse_dossier(raw)
         if bridge:
             bridge.on_agent_end("writer", ok=True)
@@ -273,7 +273,7 @@ def run_proposal_generation_phase(
                 analysis.technical_pass_mark, phases,
                 result.draft.stated_total_mandays)
             agent = reviewer.build_reviewer(overrides=overrides, settings=settings)
-            raw = _run_crew(agent, prompt, "A single JSON object matching the final dossier schema.", label="reviewer")
+            raw = _run_crew(agent, prompt, "A single JSON object matching the final dossier schema.", bridge, label="reviewer")
             result.final = reviewer.parse_dossier(
                 raw, phases=phases, mandatory_forms=analysis.mandatory_forms,
                 stated_mandays=result.draft.stated_total_mandays,
